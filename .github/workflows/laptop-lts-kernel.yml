@@ -1,81 +1,19 @@
-name: HP Victus Arch LTS 6.18.36 & Nvidia Open Kernel Builder
-
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-
-jobs:
-  build-laptop-lts-6-18-36:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Depoyu Klonla
-      uses: actions/checkout@v4
-
-    - name: Derleme Araçlarını Kur (Clang/LLVM)
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio
-
-    - name: Resmi Linux LTS 6.18.36 Kaynak Kodunu Çek
-      run: |
-        # Doğrudan 19 Haziran 2026 tarihli v6.18.36 etiketini (tag) çekerek sürümü sabitliyoruz
-        git clone --depth=1 --branch v6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
-
-    - name: lsmod.txt ve Temel Config Filtrelemesi
+- name: Thin-LTO ve Sürücü Kararlılık Ayarları
       run: |
         cd linux-source
-        # Varsayılan x86_64 konfigürasyon şablonunu oluştur
-        make defconfig
         
-        # Laptopundan aldığın lsmod.txt dosyasını içeri aktar ve donanımına göre sistemi buda
-        cp ../lsmod.txt .
-        make LSMOD=lsmod.txt localmodconfig
-
-    - name: Thin-LTO ve Sürücü Kararlılık Ayarları
-      run: |
-        cd linux-source
-        # Thin-LTO entegrasyonunu aktif et
+        # 1. Doğru Clang LTO Değişkenlerini Ayarlıyoruz (Burayı Düzelttik)
         scripts/config --disable CONFIG_LTO_NONE
-        scripts/config --enable CONFIG_LTO_THIN
+        scripts/config --disable CONFIG_LTO_CLANG_FULL
+        scripts/config --enable CONFIG_LTO_CLANG_THIN
         
-        # nvidia-open-dkms sürücüsünün bu kernelde hatasız derlenmesi için gereken modül şartları
+        # 2. Nvidia Open ve Kararlılık Ayarları
         scripts/config --enable CONFIG_MODULES
         scripts/config --enable CONFIG_SYSFS
         scripts/config --enable CONFIG_PROC_FS
         scripts/config --enable CONFIG_X86_PAT
         scripts/config --disable CONFIG_DEBUG_INFO_BTF
 
-    - name: Çekirdeği Clang + Donanımsal Zen 4 Optimizasyonuyla Derle
-      run: |
-        cd linux-source
-        # Clang derleyicisine tüm vanilla 6.18.36 kodlarını doğrudan Ryzen 7 8845HS (znver4) için işlemesini söylüyoruz
-        make -j$(nproc) CC=clang LD=ld.lld LLVM=1 KCFLAGS="-march=znver4 -O3"
-
-    - name: Dağıtım Paketini Hazırla (Kernel + Headers)
-      run: |
-        mkdir -p build_output/boot
-        cd linux-source
-        
-        # 1. Derlenen 6.18.36 çekirdek imajını kopyala
-        cp arch/x86/boot/bzImage ../build_output/boot/vmlinuz-linux-lts-6.18.36
-        
-        # 2. Sistem modüllerini paket içine yükle
-        make modules_install INSTALL_MOD_PATH=../build_output/
-        
-        # 3. nvidia-open-dkms'in uyanırken ihtiyaç duyacağı HEADERS (Başlık) dosyaları
-        KERNEL_VER=$(make kernelrelease)
-        mkdir -p ../build_output/usr/lib/modules/$KERNEL_VER/build
-        cp --parents Makefile .config Module.symvers System.map arch/x86/Makefile ../build_output/usr/lib/modules/$KERNEL_VER/build/
-        cp -r --parents arch/x86/include include scripts ../build_output/usr/lib/modules/$KERNEL_VER/build/
-        
-        cd ..
-        # Tüm yapıyı tek bir arşivde sıkıştır
-        tar -czf linux-lts-6.18.36-laptop.tar.gz build_output/
-
-    - name: Hazır Çekirdek Paketini Yayınla
-      uses: actions/upload-artifact@v4
-      with:
-        name: laptop-lts-6.18.36-kernel
-        path: linux-lts-6.18.36-laptop.tar.gz
+        # 3. SİHİRLİ DOKUNUŞ: Çekirdeğin interaktif soru sormasını engelle, 
+        # Thin-LTO bağımlılıklarını arka planda otomatik olarak çöz ve kaydet.
+        make LLVM=1 olddefconfig
