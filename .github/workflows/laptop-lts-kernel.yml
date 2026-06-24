@@ -21,8 +21,7 @@ jobs:
     - name: Resmi Linux LTS Kaynak Kodunu Çek
       run: |
         # Arch Linux'un güncel olarak kullandığı resmi LTS dalını (Örn: linux-6.12.y veya 6.18.y) upstream olarak çekiyoruz
-        git clone --depth=1 -b linux-6.12.y https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
-
+        git clone --depth=1 -b linux-6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
     - name: lsmod.txt ve Temel Config Filtrelemesi
       run: |
         cd linux-source
