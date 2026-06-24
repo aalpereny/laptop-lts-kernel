@@ -1,4 +1,4 @@
-name: HP Victus Pure Arch LTS & Nvidia Open Kernel Builder
+name: HP Victus Arch LTS 6.18.36 & Nvidia Open Kernel Builder
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-laptop-lts:
+  build-laptop-lts-6-18-36:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,28 +18,29 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio
 
-    - name: Resmi Linux LTS Kaynak Kodunu Çek
+    - name: Resmi Linux LTS 6.18.36 Kaynak Kodunu Çek
       run: |
-        # Arch Linux'un güncel olarak kullandığı resmi LTS dalını (Örn: linux-6.12.y veya 6.18.y) upstream olarak çekiyoruz
-        git clone --depth=1 -b linux-6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
+        # Doğrudan 19 Haziran 2026 tarihli v6.18.36 etiketini (tag) çekerek sürümü sabitliyoruz
+        git clone --depth=1 --branch v6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/longterm/linux.git linux-source
+
     - name: lsmod.txt ve Temel Config Filtrelemesi
       run: |
         cd linux-source
-        # Standart x86_64 konfigürasyonunu oluştur
+        # Varsayılan x86_64 konfigürasyon şablonunu oluştur
         make defconfig
         
-        # Depona yüklediğin laptop lsmod.txt dosyasını içeri aktar ve donanımına göre sistemi buda
+        # Laptopundan aldığın lsmod.txt dosyasını içeri aktar ve donanımına göre sistemi buda
         cp ../lsmod.txt .
         make LSMOD=lsmod.txt localmodconfig
 
     - name: Thin-LTO ve Sürücü Kararlılık Ayarları
       run: |
         cd linux-source
-        # Thin-LTO ayarlarını aktif et
+        # Thin-LTO entegrasyonunu aktif et
         scripts/config --disable CONFIG_LTO_NONE
         scripts/config --enable CONFIG_LTO_THIN
         
-        # nvidia-open-dkms sürücüsünün yerelde hatasız derlenmesi için gereken kritik modül şartları
+        # nvidia-open-dkms sürücüsünün bu kernelde hatasız derlenmesi için gereken modül şartları
         scripts/config --enable CONFIG_MODULES
         scripts/config --enable CONFIG_SYSFS
         scripts/config --enable CONFIG_PROC_FS
@@ -49,7 +50,7 @@ jobs:
     - name: Çekirdeği Clang + Donanımsal Zen 4 Optimizasyonuyla Derle
       run: |
         cd linux-source
-        # KCFLAGS kullanarak Clang'e tüm vanilla LTS kodlarını doğrudan Zen 4 (znver4) komut setleriyle ve -O3 ile derlemesini emrediyoruz
+        # Clang derleyicisine tüm vanilla 6.18.36 kodlarını doğrudan Ryzen 7 8845HS (znver4) için işlemesini söylüyoruz
         make -j$(nproc) CC=clang LD=ld.lld LLVM=1 KCFLAGS="-march=znver4 -O3"
 
     - name: Dağıtım Paketini Hazırla (Kernel + Headers)
@@ -57,13 +58,13 @@ jobs:
         mkdir -p build_output/boot
         cd linux-source
         
-        # 1. Çekirdek imajını kopyala
-        cp arch/x86/boot/bzImage ../build_output/boot/vmlinuz-linux-lts-custom
+        # 1. Derlenen 6.18.36 çekirdek imajını kopyala
+        cp arch/x86/boot/bzImage ../build_output/boot/vmlinuz-linux-lts-6.18.36
         
         # 2. Sistem modüllerini paket içine yükle
         make modules_install INSTALL_MOD_PATH=../build_output/
         
-        # 3. nvidia-open-dkms'in laptopta uyanırken ihtiyaç duyacağı HEADERS (Başlık) yapılandırması
+        # 3. nvidia-open-dkms'in uyanırken ihtiyaç duyacağı HEADERS (Başlık) dosyaları
         KERNEL_VER=$(make kernelrelease)
         mkdir -p ../build_output/usr/lib/modules/$KERNEL_VER/build
         cp --parents Makefile .config Module.symvers System.map arch/x86/Makefile ../build_output/usr/lib/modules/$KERNEL_VER/build/
@@ -71,10 +72,10 @@ jobs:
         
         cd ..
         # Tüm yapıyı tek bir arşivde sıkıştır
-        tar -czf linux-archlts-laptop.tar.gz build_output/
+        tar -czf linux-lts-6.18.36-laptop.tar.gz build_output/
 
     - name: Hazır Çekirdek Paketini Yayınla
       uses: actions/upload-artifact@v4
       with:
-        name: laptop-archlts-kernel
-        path: linux-archlts-laptop.tar.gz
+        name: laptop-lts-6.18.36-kernel
+        path: linux-lts-6.18.36-laptop.tar.gz
