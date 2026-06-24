@@ -1,0 +1,81 @@
+name: HP Victus Pure Arch LTS & Nvidia Open Kernel Builder
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-laptop-lts:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Depoyu Klonla
+      uses: actions/checkout@v4
+
+    - name: Derleme Araçlarını Kur (Clang/LLVM)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio
+
+    - name: Resmi Linux LTS Kaynak Kodunu Çek
+      run: |
+        # Arch Linux'un güncel olarak kullandığı resmi LTS dalını (Örn: linux-6.12.y veya 6.18.y) upstream olarak çekiyoruz
+        git clone --depth=1 -b linux-6.12.y https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
+
+    - name: lsmod.txt ve Temel Config Filtrelemesi
+      run: |
+        cd linux-source
+        # Standart x86_64 konfigürasyonunu oluştur
+        make defconfig
+        
+        # Depona yüklediğin laptop lsmod.txt dosyasını içeri aktar ve donanımına göre sistemi buda
+        cp ../lsmod.txt .
+        make LSMOD=lsmod.txt localmodconfig
+
+    - name: Thin-LTO ve Sürücü Kararlılık Ayarları
+      run: |
+        cd linux-source
+        # Thin-LTO ayarlarını aktif et
+        scripts/config --disable CONFIG_LTO_NONE
+        scripts/config --enable CONFIG_LTO_THIN
+        
+        # nvidia-open-dkms sürücüsünün yerelde hatasız derlenmesi için gereken kritik modül şartları
+        scripts/config --enable CONFIG_MODULES
+        scripts/config --enable CONFIG_SYSFS
+        scripts/config --enable CONFIG_PROC_FS
+        scripts/config --enable CONFIG_X86_PAT
+        scripts/config --disable CONFIG_DEBUG_INFO_BTF
+
+    - name: Çekirdeği Clang + Donanımsal Zen 4 Optimizasyonuyla Derle
+      run: |
+        cd linux-source
+        # KCFLAGS kullanarak Clang'e tüm vanilla LTS kodlarını doğrudan Zen 4 (znver4) komut setleriyle ve -O3 ile derlemesini emrediyoruz
+        make -j$(nproc) CC=clang LD=ld.lld LLVM=1 KCFLAGS="-march=znver4 -O3"
+
+    - name: Dağıtım Paketini Hazırla (Kernel + Headers)
+      run: |
+        mkdir -p build_output/boot
+        cd linux-source
+        
+        # 1. Çekirdek imajını kopyala
+        cp arch/x86/boot/bzImage ../build_output/boot/vmlinuz-linux-lts-custom
+        
+        # 2. Sistem modüllerini paket içine yükle
+        make modules_install INSTALL_MOD_PATH=../build_output/
+        
+        # 3. nvidia-open-dkms'in laptopta uyanırken ihtiyaç duyacağı HEADERS (Başlık) yapılandırması
+        KERNEL_VER=$(make kernelrelease)
+        mkdir -p ../build_output/usr/lib/modules/$KERNEL_VER/build
+        cp --parents Makefile .config Module.symvers System.map arch/x86/Makefile ../build_output/usr/lib/modules/$KERNEL_VER/build/
+        cp -r --parents arch/x86/include include scripts ../build_output/usr/lib/modules/$KERNEL_VER/build/
+        
+        cd ..
+        # Tüm yapıyı tek bir arşivde sıkıştır
+        tar -czf linux-archlts-laptop.tar.gz build_output/
+
+    - name: Hazır Çekirdek Paketini Yayınla
+      uses: actions/upload-artifact@v4
+      with:
+        name: laptop-archlts-kernel
+        path: linux-archlts-laptop.tar.gz
