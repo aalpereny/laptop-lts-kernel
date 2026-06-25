@@ -25,30 +25,21 @@ jobs:
         # Saf LTS v6.18.36 çekirdek kaynak kodunu sığ (hızlı) olarak çeker
         git clone --depth=1 --branch v6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
 
-    - name: 4. Fetch CachyOS 6.18 Patches via Git Sparse Checkout
+    - name: 4. Fetch CachyOS Patches via Standard Git Clone
       run: |
-        # Deponun tüm geçmişini (metadata) çekiyoruz ancak hiçbir dosya içeriğini (blob) ve çalışma dizinini henüz diske yazmıyoruz
-        git clone --filter=blob:none --no-checkout https://github.com/cachyos/kernel-patches.git ../cachyos-patches
+        # Yol karmaşası olmasın diye doğrudan ana çalışma dizinine (Workspace) klonluyoruz (Başına ../ koymadık)
+        git clone --depth=1 https://github.com/cachyos/kernel-patches.git cachyos-patches
         
-        cd ../cachyos-patches
-        # Seyrek çekim modunu açıyor ve Git'e SADECE 6.18 klasörünü istediğimizi söylüyoruz
-        git sparse-checkout init --cone
-        git sparse-checkout set 6.18
-        
-        # Klonlama ile tüm geçmiş yerel veritabanımıza geldiği için sunucuya fetch atmadan DOĞRUDAN commit numarasına geçiş yapıyoruz.
-        # Git, blob:none filtresi ve sparse-checkout kuralımız sayesinde SADECE bu commit'teki 6.18 klasörünün dosyalarını indirecektir.
-        git checkout 60f4eb74bf3be434f0c439f044d081f97df40356
-        
-        cd ../linux-source
-        # Yalnızca içeri çekilen 6.18 klasöründeki yamaları sırayla çekirdeğe dikiyoruz
+        cd linux-source
+        # linux-source içerisinden bir üst klasördeki (..) cachyos-patches'a artık rahatça erişebiliriz
         if [ -d "../cachyos-patches/6.18" ]; then
-          echo "🔥 CachyOS 6.18 yamaları çekirdeğe uygulanıyor..."
-          find ../cachyos-patches/6.18/ -type f -name "*.patch" | merge_file="" | sort | while read -r patch_file; do
+          echo "✅ CachyOS 6.18 klasörü başarıyla doğrulandı! Yamalar dikiliyor..."
+          find ../cachyos-patches/6.18/ -type f -name "*.patch" | sort | while read -r patch_file; do
             echo "Uygulanan yama: $patch_file"
             patch -p1 --batch --forward < "$patch_file" || echo "⚠️ Bazı hunklar zaten uygulanmış olabilir, devam ediliyor..."
           done
         else
-          echo "❌ HATA: Git sparse checkout sonrasında 6.18 klasörü bulunamadı!"
+          echo "❌ HATA: cachyos-patches/6.18 klasörü bulunamadı!"
           exit 1
         fi
 
