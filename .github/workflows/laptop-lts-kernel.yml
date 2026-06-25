@@ -17,29 +17,31 @@ jobs:
     - name: 2. Install Build Dependencies
       run: |
         sudo apt-get update
-        # Yamalama ve derleme için gerekli tüm araçlar yüklenir
-        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio kmod patch wget unzip
+        # Derleme ve yamalama için gerekli temel paketler (unzip kaldırıldı)
+        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio kmod patch wget
 
     - name: 3. Clone Vanilla Linux Kernel Source
       run: |
         # Saf LTS v6.18.36 çekirdek kaynak kodunu sığ (hızlı) olarak çeker
         git clone --depth=1 --branch v6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
 
-    - name: 4. Direct Fetch CachyOS 6.18 Patches via Archive
+    - name: 4. Fetch CachyOS 6.18 Patches via Git Sparse Checkout
       run: |
-        # Adım 2: 6.18 yamalarının eksiksiz bulunduğu kararlı bir commit snapshot'ını ZIP olarak direkt indiriyoruz
-        # Bu sayede git geçmişini tarama zahmetinden ve gelecekteki silinme risklerinden tamamen kurtuluyoruz.
-        mkdir -p ../cachyos-patches
+        # Depoyu hiç dosya (blob) indirmeden ve diske yazmadan (no-checkout) kısmi olarak başlatıyoruz
+        git clone --filter=blob:none --no-checkout https://github.com/cachyos/kernel-patches.git ../cachyos-patches
         
-        echo "📥 CachyOS 6.18 destekli yamalar doğrudan indiriliyor..."
-        wget https://github.com/cachyos/kernel-patches/archive/60f4eb74bf3be434f0c439f044d081f97df40356.zip -O ../patches.zip
+        cd ../cachyos-patches
+        # Seyrek çekim modunu açıyor ve Git'e SADECE 6.18 klasörünü istediğimizi söylüyoruz
+        git sparse-checkout init --cone
+        git sparse-checkout set 6.18
         
-        # ZIP dosyasını aç ve klasör yapısını eşitle
-        unzip -q ../patches.zip -d ../tmp-patches
-        mv ../tmp-patches/kernel-patches-60f4eb74bf3be434f0c439f044d081f97df40356/* ../cachyos-patches/
+        # 6.18 yamalarının sapasağlam durduğu kararlı commit noktasını sığ (depth=1) olarak çekiyoruz
+        git fetch --depth=1 origin 60f4eb74bf3be434f0c439f044d081f97df40356
+        # Sadece hedeflediğimiz klasörün içeriğini diske basıyoruz
+        git checkout FETCH_HEAD
         
-        cd linux-source
-        # İndirilen klasördeki 6.18 yamalarını sırayla çekirdeğe dikiyoruz
+        cd ../linux-source
+        # Yalnızca içeri çekilen 6.18 klasöründeki yamaları sırayla çekirdeğe dikiyoruz
         if [ -d "../cachyos-patches/6.18" ]; then
           echo "🔥 CachyOS 6.18 yamaları çekirdeğe uygulanıyor..."
           find ../cachyos-patches/6.18/ -type f -name "*.patch" | sort | while read -r patch_file; do
@@ -47,7 +49,7 @@ jobs:
             patch -p1 --batch --forward < "$patch_file" || echo "⚠️ Bazı hunklar zaten uygulanmış olabilir, devam ediliyor..."
           done
         else
-          echo "❌ HATA: Doğrudan indirilen arşivde 6.18 klasörü bulunamadı!"
+          echo "❌ HATA: Git sparse checkout sonrasında 6.18 klasörü bulunamadı!"
           exit 1
         fi
 
