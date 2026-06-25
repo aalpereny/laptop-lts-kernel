@@ -28,7 +28,7 @@ jobs:
     - name: 4. Fetch and Apply Official CachyOS Patches
       run: |
         # Adım 2: CachyOS resmi yama havuzunu indiriyoruz
-        git clone --depth=1 https://github.com/cachyos/kernel-patches.git ../cachyos-patches
+        git clone https://github.com/CachyOS/kernel-patches.git ../cachyos-patches
         
         cd linux-source
         # 6.18 sürümüne ait tüm CachyOS performans ve BORE yamalarını sırayla uyguluyoruz
