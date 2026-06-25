@@ -17,7 +17,7 @@ jobs:
     - name: 2. Install Build Dependencies
       run: |
         sudo apt-get update
-        # Derleme ve yamalama için gerekli temel paketler (unzip kaldırıldı)
+        # Derleme ve yamalama için gerekli temel paketler
         sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio kmod patch wget
 
     - name: 3. Clone Vanilla Linux Kernel Source
@@ -27,7 +27,7 @@ jobs:
 
     - name: 4. Fetch CachyOS 6.18 Patches via Git Sparse Checkout
       run: |
-        # Depoyu hiç dosya (blob) indirmeden ve diske yazmadan (no-checkout) kısmi olarak başlatıyoruz
+        # Deponun tüm geçmişini (metadata) çekiyoruz ancak hiçbir dosya içeriğini (blob) ve çalışma dizinini henüz diske yazmıyoruz
         git clone --filter=blob:none --no-checkout https://github.com/cachyos/kernel-patches.git ../cachyos-patches
         
         cd ../cachyos-patches
@@ -35,16 +35,15 @@ jobs:
         git sparse-checkout init --cone
         git sparse-checkout set 6.18
         
-        # 6.18 yamalarının sapasağlam durduğu kararlı commit noktasını sığ (depth=1) olarak çekiyoruz
-        git fetch --depth=1 origin 60f4eb74bf3be434f0c439f044d081f97df40356
-        # Sadece hedeflediğimiz klasörün içeriğini diske basıyoruz
-        git checkout FETCH_HEAD
+        # Klonlama ile tüm geçmiş yerel veritabanımıza geldiği için sunucuya fetch atmadan DOĞRUDAN commit numarasına geçiş yapıyoruz.
+        # Git, blob:none filtresi ve sparse-checkout kuralımız sayesinde SADECE bu commit'teki 6.18 klasörünün dosyalarını indirecektir.
+        git checkout 60f4eb74bf3be434f0c439f044d081f97df40356
         
         cd ../linux-source
         # Yalnızca içeri çekilen 6.18 klasöründeki yamaları sırayla çekirdeğe dikiyoruz
         if [ -d "../cachyos-patches/6.18" ]; then
           echo "🔥 CachyOS 6.18 yamaları çekirdeğe uygulanıyor..."
-          find ../cachyos-patches/6.18/ -type f -name "*.patch" | sort | while read -r patch_file; do
+          find ../cachyos-patches/6.18/ -type f -name "*.patch" | merge_file="" | sort | while read -r patch_file; do
             echo "Uygulanan yama: $patch_file"
             patch -p1 --batch --forward < "$patch_file" || echo "⚠️ Bazı hunklar zaten uygulanmış olabilir, devam ediliyor..."
           done
