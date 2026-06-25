@@ -11,50 +11,65 @@ jobs:
     name: build-laptop-lts-6-18-36
 
     steps:
-    - name: Checkout Repository
+    - name: 1. Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Install Build Dependencies
+    - name: 2. Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio kmod
 
-    - name: Clone Linux Kernel Source
+    - name: 3. Clone Linux Kernel Source
       run: |
-        # v6.18.36 sürümünü linux-source klasörüne çekiyoruz
+        # LTS v6.18.36 çekirdek kaynak kodunu sığ (hızlı) olarak çeker
         git clone --depth=1 --branch v6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
 
-    - name: Configure Kernel (localmodconfig)
+    - name: 4. Configure Kernel (localmodconfig, Debug Stripping & ThinLTO)
       run: |
         cd linux-source
-        # Varsayılan x86_64 şablonunu oluştur
+        # Varsayılan x86_64 konfigürasyonunu oluştur
         make defconfig
         
-        # lsmod.txt dosyasını kopyala ve CI'ın takılmaması için otomatik onay (yes "") ile buda
+        # Ana dizindeki lsmod.txt dosyasını kaynak kodun içine kopyala
         cp ../lsmod.txt .
+        
+        # Donanım budamasını çalıştır (CI'ın takılmaması için otomatik "enter" basar)
         yes "" | make LSMOD=lsmod.txt localmodconfig
+        
+        # --- BOYUTU KÜÇÜLTME: Hata ayıklama sembollerini tamamen kapat ---
+        scripts/config --disable CONFIG_DEBUG_INFO
+        scripts/config --disable CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
+        scripts/config --disable CONFIG_DEBUG_INFO_DWARF4
+        scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
+        scripts/config --disable CONFIG_DEBUG_INFO_BTF
+        scripts/config --disable CONFIG_DEBUG_KERNEL
+        scripts/config --disable CONFIG_DEBUG_MISC
+        
+        # --- PERFORMANS: ThinLTO optimizasyonunu zorla ---
+        scripts/config --disable CONFIG_LTO_NONE
+        scripts/config --enable CONFIG_LTO_CLANG_THIN
 
-    - name: Compile Kernel with LLVM/Clang
+    - name: 5. Compile Kernel with LLVM/Clang
       run: |
         cd linux-source
-        # İşlemci çekirdek sayısına göre hızlıca derle
+        # İşlemci limitlerini zorlayarak imajı ve modülleri derler
         make -j$(nproc) LLVM=1 bzImage modules
 
-    - name: Prepare Arch Linux Compatible Artifact Directory
+    - name: 6. Prepare Arch Linux Compatible Artifact Directory
       run: |
-        # Çıktıların toplanacağı temiz bir klasör oluşturuyoruz
+        # Çıktıların toplanacağı izole klasörü oluştur
         mkdir -p kernel-artifacts
         
         cd linux-source
-        # Çekirdek imajını, config ve System.map dosyalarını kopyala
+        # Temel kernel dosyalarını kopyala ve yeniden adlandır
         cp arch/x86/boot/bzImage ../kernel-artifacts/vmlinuz-linux-laptop
         cp .config ../kernel-artifacts/config-linux-laptop
         cp System.map ../kernel-artifacts/System.map-linux-laptop
         
-        # Derlenen tüm modülleri bu klasörün içine yapılandırarak yükle
-        make LLVM=1 modules_install INSTALL_MOD_PATH=../kernel-artifacts
+        # Modülleri içindeki gereksiz loglardan (INSTALL_MOD_STRIP=1 ile) arındırarak yükle
+        make LLVM=1 INSTALL_MOD_STRIP=1 modules_install INSTALL_MOD_PATH=../kernel-artifacts
 
-    - name: Upload Kernel Artifacts to GitHub
+    - name: 7. Upload Kernel Artifacts to GitHub
       uses: actions/upload-artifact@v4
       with:
         name: laptop-lts-kernel-package
