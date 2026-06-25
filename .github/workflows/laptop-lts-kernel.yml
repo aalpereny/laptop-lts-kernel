@@ -1,4 +1,4 @@
-name: Build Laptop LTS Kernel
+name: Build S1002NT BORE LTO Kernel
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 jobs:
   build-kernel:
     runs-on: ubuntu-24.04
-    name: build-laptop-lts-6-18-36
+    name: build-6.18.36_LTS-S1002NT-BORE-LTO
 
     steps:
     - name: 1. Checkout Repository
@@ -17,61 +17,109 @@ jobs:
     - name: 2. Install Build Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio kmod
+        # Yamalama ve derleme için gerekli tüm araçlar yüklenir
+        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev clang llvm lld bc cpio kmod patch wget
 
-    - name: 3. Clone Linux Kernel Source
+    - name: 3. Clone Vanilla Linux Kernel Source
       run: |
-        # LTS v6.18.36 çekirdek kaynak kodunu sığ (hızlı) olarak çeker
+        # Adım 1: Saf LTS v6.18.36 çekirdek kaynak kodunu sığ (hızlı) olarak çeker
         git clone --depth=1 --branch v6.18.36 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-source
 
-    - name: 4. Configure Kernel (localmodconfig, Debug Stripping & ThinLTO)
+    - name: 4. Fetch and Apply Official CachyOS Patches
+      run: |
+        # Adım 2: CachyOS resmi yama havuzunu indiriyoruz
+        git clone --depth=1 https://github.com/cachyos/kernel-patches.git ../cachyos-patches
+        
+        cd linux-source
+        # 6.18 sürümüne ait tüm CachyOS performans ve BORE yamalarını sırayla uyguluyoruz
+        if [ -d "../cachyos-patches/6.18" ]; then
+          echo "🔥 CachyOS 6.18 yamaları çekirdeğe dikiliyor..."
+          find ../cachyos-patches/6.18/ -type f -name "*.patch" | sort | while read -r patch_file; do
+            echo "Uygulanan Yama: $patch_file"
+            patch -p1 --batch --forward < "$patch_file" || echo "⚠️ Bazı hunklar zaten uygulanmış olabilir, devam ediliyor..."
+          done
+        else
+          echo "❌ HATA: CachyOS deposunda 6.18 klasörü bulunamadı!"
+          exit 1
+        fi
+
+    - name: 5. Include Only Target Drivers (localmodconfig)
       run: |
         cd linux-source
-        # Varsayılan x86_64 konfigürasyonunu oluştur
+        # Varsayılan temel konfigürasyonu oluştur
         make defconfig
         
-        # Ana dizindeki lsmod.txt dosyasını kaynak kodun içine kopyala
+        # Adım 3: Ana dizindeki lsmod.txt dosyasını kopyala ve sadece bu donanımları göm
         cp ../lsmod.txt .
-        
-        # Donanım budamasını çalıştır (CI'ın takılmaması için otomatik "enter" basar)
         yes "" | make LSMOD=lsmod.txt localmodconfig
-        
-        # --- BOYUTU KÜÇÜLTME: Hata ayıklama sembollerini tamamen kapat ---
-        scripts/config --disable CONFIG_DEBUG_INFO
-        scripts/config --disable CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
-        scripts/config --disable CONFIG_DEBUG_INFO_DWARF4
-        scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
-        scripts/config --disable CONFIG_DEBUG_INFO_BTF
-        scripts/config --disable CONFIG_DEBUG_KERNEL
-        scripts/config --disable CONFIG_DEBUG_MISC
-        
-        # --- PERFORMANS: ThinLTO optimizasyonunu zorla ---
-        scripts/config --disable CONFIG_LTO_NONE
-        scripts/config --enable CONFIG_LTO_CLANG_THIN
 
-    - name: 5. Compile Kernel with LLVM/Clang
+    - name: 6. Inject ThinLTO, Custom Name & Strip All Debug Files
       run: |
         cd linux-source
-        # İşlemci limitlerini zorlayarak imajı ve modülleri derler
-        make -j$(nproc) LLVM=1 bzImage modules
+        
+        # --- ÖZEL ÇEKİRDEK İSMİ (CONFIG_LOCALVERSION) ---
+        # Tam olarak istediğin biçimde sürüm eklentisini enjekte ediyoruz
+        ./scripts/config --set-str CONFIG_LOCALVERSION "_LTS-S1002NT-BORE-LTO"
+        
+        # --- CACHYOS PERFORMANS VE BORE SEÇENEKLERİ ---
+        ./scripts/config --enable CONFIG_SCHED_BORE
+        ./scripts/config --disable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+        ./scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
+        ./scripts/config --disable CONFIG_HZ_250
+        ./scripts/config --disable CONFIG_HZ_300
+        ./scripts/config --enable CONFIG_HZ_1000
+        ./scripts/config --set-val CONFIG_HZ 1000
+        ./scripts/config --disable CONFIG_PREEMPT_NONE
+        ./scripts/config --disable CONFIG_PREEMPT_VOLUNTARY
+        ./scripts/config --enable CONFIG_PREEMPT
+        ./scripts/config --enable CONFIG_PREEMPT_COUNT
+        ./scripts/config --enable CONFIG_PREEMPTION
+        ./scripts/config --enable CONFIG_SCHED_AUTOGROUP
+        ./scripts/config --enable CONFIG_PREEMPT_DYNAMIC
+        
+        # --- SIFIR DEBUG SEMBOLÜ (Boyutu uçuran her şeyi kapat) ---
+        ./scripts/config --enable CONFIG_DEBUG_INFO_NONE
+        ./scripts/config --disable CONFIG_DEBUG_INFO
+        ./scripts/config --disable CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
+        ./scripts/config --disable CONFIG_DEBUG_INFO_DWARF4
+        ./scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
+        ./scripts/config --disable CONFIG_DEBUG_INFO_BTF
+        ./scripts/config --disable CONFIG_DEBUG_KERNEL
+        ./scripts/config --disable CONFIG_DEBUG_MISC
+        
+        # --- THINLTO OPTİMİZASYONUNU AKTİF ET ---
+        ./scripts/config --disable CONFIG_LTO_NONE
+        ./scripts/config --enable CONFIG_LTO_CLANG_THIN
+        
+        # Tüm bu ayarları çekirdek mimarisine kilitle
+        make olddefconfig
 
-    - name: 6. Prepare Arch Linux Compatible Artifact Directory
+    - name: 7. Compile Kernel with LLVM/Clang (ThinLTO & x86-64-v4)
       run: |
-        # Çıktıların toplanacağı izole klasörü oluştur
+        cd linux-source
+        # Derleyiciyi ThinLTO ve işlemci mimari bayraklarıyla (v4) ateşle
+        make -j$(nproc) LLVM=1 KCFLAGS="-O3 -march=x86-64-v4" bzImage modules
+
+    - name: 8. Prepare Clean Artifacts (No Symlinks, Custom Named Files)
+      run: |
         mkdir -p kernel-artifacts
         
         cd linux-source
-        # Temel kernel dosyalarını kopyala ve yeniden adlandır
-        cp arch/x86/boot/bzImage ../kernel-artifacts/vmlinuz-linux-laptop
-        cp .config ../kernel-artifacts/config-linux-laptop
-        cp System.map ../kernel-artifacts/System.map-linux-laptop
+        # Çekirdek imajını, config ve haritasını yeni isimlendirmeyle kopyala
+        cp arch/x86/boot/bzImage ../kernel-artifacts/vmlinuz-6.18.36_LTS-S1002NT-BORE-LTO
+        cp .config ../kernel-artifacts/config-6.18.36_LTS-S1002NT-BORE-LTO
+        cp System.map ../kernel-artifacts/System.map-6.18.36_LTS-S1002NT-BORE-LTO
         
-        # Modülleri içindeki gereksiz loglardan (INSTALL_MOD_STRIP=1 ile) arındırarak yükle
-        make LLVM=1 INSTALL_MOD_STRIP=1 modules_install INSTALL_MOD_PATH=../kernel-artifacts
+        # Sürücü modüllerini sembollerden arındırarak (INSTALL_MOD_STRIP=1) yükle
+        make LLVM=1 KCFLAGS="-O3 -march=x86-64-v4" INSTALL_MOD_STRIP=1 modules_install INSTALL_MOD_PATH=../kernel-artifacts
+        
+        # GitHub Artifacts aracının kaynak kodları içeri çekmesini engelleyen sembolik bağları yok et
+        rm -f ../kernel-artifacts/lib/modules/*/build
+        rm -f ../kernel-artifacts/lib/modules/*/source
 
-    - name: 7. Upload Kernel Artifacts to GitHub
+    - name: 9. Upload Pure Optimized Kernel Package
       uses: actions/upload-artifact@v4
       with:
-        name: laptop-lts-kernel-package
+        name: 6.18.36_LTS-S1002NT-BORE-LTO
         path: kernel-artifacts/
         if-no-files-found: error
