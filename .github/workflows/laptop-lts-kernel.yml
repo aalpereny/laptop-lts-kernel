@@ -76,6 +76,13 @@ jobs:
         ./scripts/config --enable CONFIG_PREEMPTION
         ./scripts/config --enable CONFIG_SCHED_AUTOGROUP
         ./scripts/config --enable CONFIG_PREEMPT_DYNAMIC
+
+        # --- LZ4 KRIPTO ALGORITMASI VE INITRAMFS DESTEGI ---
+        .scripts/config --enable CONFIG_CRYPTO_LZ4
+        .scripts/config --enable CONFIG_CRYPTO_LZ4HC
+        .scripts/config --enable CONFIG_LZ4_COMPRESS
+        .scripts/config --enable CONFIG_LZ4_DECOMPRESS
+        .scripts/config --enable CONFIG_RD_LZ4
         
         # --- SIFIR DEBUG SEMBOLÜ (Boyutu uçuran her şeyi kapat) ---
         ./scripts/config --enable CONFIG_DEBUG_INFO_NONE
